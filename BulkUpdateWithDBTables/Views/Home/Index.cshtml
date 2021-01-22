@@ -1,0 +1,183 @@
+﻿@{
+    ViewBag.Title = "Home Page";
+}
+<style>
+  .scroll .dropdown-menu {
+    max-height: 500px;
+    overflow-y: auto;
+  }
+  .pointer {
+    cursor: pointer;
+  }
+  .ellipsis {
+    max-width: 100px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    }
+</style>
+
+<div id="bulkUpdate" class="container">
+    <div class="row">
+        <div class="col">
+            <div class="dropdown scroll">
+                <button class="btn btn-primary dropdown-toggle" type="button" data-toggle="dropdown">
+                    {{selectedTable}}
+                    <span class="caret"></span>
+                </button>
+                <ul class="dropdown-menu">
+                    <li>
+                        <a class="dropdown-item"
+                           v-for="(table, index) in tableNames" :key="index"
+                           v-on:click="pickTableName(table)">
+                            {{table}}
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="row" style="margin-top: 15px;">
+        <div class="col-sm-2" style="padding-left: 0px;margin-top: 5px;" v-for="(c, index) in columnNames" :key="index">
+            <label for="reorder-level-id">{{c.COLUMN_NAME}}</label>
+            <div>
+                <input v-if="c.DATA_TYPE == 'int'" v-model="product[c.COLUMN_NAME]" type="number" />
+                <input v-if="c.DATA_TYPE == 'string'" v-model="product[c.COLUMN_NAME]" type="text" max="c.CHARACTER_MAXIMUM_LENGTH" />
+                <input v-if="c.DATA_TYPE == 'datetime'" v-model="product[c.COLUMN_NAME]" type="date" />
+                <input v-if="c.DATA_TYPE == 'bit'" v-model="product[c.COLUMN_NAME]" type="checkbox" />
+                <input v-if="c.DATA_TYPE == 'float'" v-model="product[c.COLUMN_NAME]" type="number" min="0.00" step="0.01"/>
+            </div>
+        </div>
+    </div>
+    <div v-if="columnNames.length != 0" class="row" style="margin-top: 15px;">
+        <div class="col">
+            <button class="btn btn-success" v-on:click="bulkUpdate()">Save Product</button>
+        </div>
+    </div>
+    <div class="row" style="margin-top: 15px;">
+        <div class="col">
+            <table class="table table-striped table-bordered" style="overflow-x:auto;">
+                <thead>
+                    <tr>
+                        <th v-for="(field, index) in fields" :key="index">{{field}}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="(item, index) in data" :key="index">
+                        <template v-if="item[0].Value != editId">
+                            <td class="ellipsis" v-for="(field, index) in item" :key="index">{{field.Value}}</td>
+                            <td>
+                                <i class="ml-3 fas fa-edit pointer" aria-hidden="true" v-on:click="editRow(item)"></i>
+                            </td>
+                        </template>
+                        <template v-if="item[0].Value == editId">
+                            <td v-for="(field, index) in item" :key="index"><input type="text" style="width: 100%;" v-model="field.Value" /></td>
+                            <td>
+                                <i class="ml-3 fas fa-check-square pointer" icon="check-circle-fill" aria-hidden="true" v-on:click="rowUpdate(item)"></i>
+                                <i class="ml-3 fas fa-window-close pointer" aria-hidden="true" v-on:click="cancelRowUpdate(item)"></i>
+                            </td>
+                        </template>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import apiService from '../../Scripts/Services/apiService.js';
+
+    new Vue({
+        el: '#bulkUpdate',
+        data() {
+            return {
+                data: [],
+                product: {},
+                columnNames: [],
+                tableNames: [],
+                fields: [],
+                rowCopy: [],
+                editId: 0,
+                selectedTable: "Search Table Name",
+            };
+        },
+        computed: {
+            rows() {
+                return this.data.length;
+            }
+        },
+        mounted() {
+            apiService.getTableNames().then(response => {
+                this.tableNames = response.data;
+            });
+        },
+        methods: {
+            pickTableName(tname) {
+                this.product = {};
+                this.selectedTable = tname;
+                this.product.table = tname;
+                this.getColumnNames();
+            },
+            getColumnNames() {
+                apiService.getColumnNames(this.selectedTable).then(response => {
+                    this.columnNames = response.data;
+                    console.log(this.columnNames)
+                    this.fields = [];
+                    for (var i = 0; i < this.columnNames.length; i++) {
+                        this.fields.push(this.columnNames[i].COLUMN_NAME)
+                    }
+                })
+                apiService.getData(this.selectedTable).then(response => {
+                    this.data = response.data;
+                })
+            },
+            editRow(row) {
+                for (var i = 0; i < row.length; i++) {
+                    this.rowCopy.push(Object.assign({}, row[i]));
+                }
+                this.editId = row[0].Value;
+            },
+            bulkUpdate() {
+                var model = this.createSendRequestObjectBulkUpdate(this.product);
+                apiService.bulkUpdate(model).then(response => {
+                    this.getColumnNames();
+                })
+            },
+            rowUpdate(row) {
+                var model = this.createSendRequestObjectRowUpdate(row);
+                model.unshift({ property: "table", value: this.selectedTable })
+                apiService.rowUpdate(model).then(response => {
+                    this.editId = 0;
+                    this.getColumnNames();
+                })
+            },
+            cancelRowUpdate(row) {
+                this.editId = 0;
+                var oldRow = this.data.find(x => x[0] == row[0])
+                for (var i = 0; i < oldRow.length; i++) {
+                    Object.assign(oldRow[i], this.rowCopy[i]);
+                }
+            },
+            createSendRequestObjectBulkUpdate(item) {
+                var valuePairs = [];
+                var keys = Object.keys(item);
+                var values = Object.values(item);
+                for (var i = 0; i < keys.length; i++) {
+                    var v = values[i] == null ? null : values[i].toString();
+                    var obj = { property: keys[i], value: v }
+                    valuePairs.push(obj)
+                }
+                return valuePairs
+            },
+            createSendRequestObjectRowUpdate(item) {
+                var valuePairs = [];
+                for (var i = 0; i < item.length; i++) {
+                    var v = item[i].Value == null ? null : item[i].Value.toString();
+                    var obj = { property: item[i].Key, value: v }
+                    valuePairs.push(obj)
+                }
+                return valuePairs
+            }
+        }
+    })
+</script>
